@@ -74,7 +74,11 @@ async def compare_models(
             )
 
             for r in result.results:
-                image_id = f"compare_{comparison_id}_{r.model_id}"
+                # Use actual output filename stem as image_id so serving works
+                if r.output_path:
+                    image_id = Path(r.output_path).stem
+                else:
+                    image_id = f"compare_{comparison_id}_{r.model_id}"
                 _comparisons[comparison_id].results.append(
                     ComparisonResultSchema(
                         model_id=r.model_id,

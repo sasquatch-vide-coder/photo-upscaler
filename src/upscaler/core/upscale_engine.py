@@ -105,7 +105,9 @@ class UpscaleEngine:
                     progress_fn=tile_progress,
                 )
         except RuntimeError as e:
-            if "expected scalar type" in str(e) and use_fp16:
+            err_msg = str(e).lower()
+            is_dtype_error = "expected scalar type" in err_msg or "half" in err_msg or "float" in err_msg
+            if is_dtype_error and use_fp16:
                 logger.warning("Model %s failed with fp16, retrying in fp32", model_id)
                 self.model_manager.reload_model_fp32(model_id)
                 return self.upscale(

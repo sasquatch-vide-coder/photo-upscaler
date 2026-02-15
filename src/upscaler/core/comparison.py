@@ -150,7 +150,9 @@ class ComparisonRunner:
                     current, process_fn, model_scale, tile_size, tile_overlap, tile_progress,
                 )
         except RuntimeError as e:
-            if "expected scalar type" in str(e) and not _fp32_retry:
+            err_msg = str(e).lower()
+            is_dtype_error = "expected scalar type" in err_msg or "half" in err_msg or "float" in err_msg
+            if is_dtype_error and not _fp32_retry:
                 # fp16 incompatible — reload in fp32 and retry
                 self.model_manager.reload_model_fp32(model_id)
                 return self._upscale_single(

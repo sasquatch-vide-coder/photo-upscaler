@@ -17,9 +17,9 @@ async def get_image(image_id: str):
     """Serve a result image from the temp directory."""
     temp_dir = settings.temp_path
 
-    # Search temp dir (and subdirs) for a file matching the image_id prefix
+    # Search temp dir (and subdirs) for a file matching the image_id
     for path in temp_dir.rglob("*"):
-        if path.is_file() and path.stem.startswith(image_id):
+        if path.is_file() and (path.stem.startswith(image_id) or image_id in path.stem):
             media_type = _guess_media_type(path.suffix)
             return FileResponse(str(path), media_type=media_type)
 
