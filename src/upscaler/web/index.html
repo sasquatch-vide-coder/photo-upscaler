@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Upscaler</title>
+    <link rel="stylesheet" href="/styles/main.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="/components/ImageUploader.js"></script>
+    <script src="/components/ModelSelector.js"></script>
+    <script src="/components/ComparisonView.js"></script>
+    <script src="/components/ImageViewer.js"></script>
+    <script src="/components/ProgressTracker.js"></script>
+    <script src="/components/BatchPanel.js"></script>
+    <script src="/components/SettingsPanel.js"></script>
+    <script src="/app.js"></script>
+</head>
+<body x-data="app" x-init="init()">
+    <!-- Status Bar -->
+    <header class="status-bar">
+        <div class="status-bar-left">
+            <h1 class="logo">Photo Upscaler</h1>
+        </div>
+        <div class="status-bar-right">
+            <span class="status-chip" x-text="`${loadedModelCount} model${loadedModelCount !== 1 ? 's' : ''} loaded`"></span>
+            <button class="btn btn-icon" @click="showSettings = true" title="Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="tab-nav">
+        <button class="tab-btn" :class="{ active: tab === 'models' }" @click="tab = 'models'">Models</button>
+        <button class="tab-btn" :class="{ active: tab === 'upscale' }" @click="tab = 'upscale'">Upscale</button>
+        <button class="tab-btn" :class="{ active: tab === 'compare' }" @click="tab = 'compare'">Compare</button>
+        <button class="tab-btn" :class="{ active: tab === 'batch' }" @click="tab = 'batch'">Batch</button>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Models Tab -->
+        <div x-show="tab === 'models'" x-cloak>
+            <div x-data="modelSelector" x-init="loadModels()">
+                <template x-if="models.length === 0 && !loading">
+                    <div class="empty-state">
+                        <h2>No models found</h2>
+                        <p>Download models to get started.</p>
+                        <button class="btn btn-primary" @click="showAvailable = true">Browse Available Models</button>
+                    </div>
+                </template>
+
+                <div class="section-header" x-show="models.length > 0">
+                    <h2>Installed Models</h2>
+                    <button class="btn btn-sm" @click="showAvailable = !showAvailable" x-text="showAvailable ? 'Hide Available' : 'Download More'"></button>
+                </div>
+
+                <div class="model-grid" x-show="models.length > 0">
+                    <template x-for="model in models" :key="model.model_id">
+                        <div class="model-card">
+                            <div class="model-card-header">
+                                <span class="model-name" x-text="model.model_id"></span>
+                                <span class="model-loaded-dot" x-show="model.is_loaded" title="Loaded in VRAM"></span>
+                            </div>
+                            <div class="model-card-meta">
+                                <span class="badge" x-text="model.architecture"></span>
+                                <span class="badge badge-scale" x-text="model.scale + 'x'"></span>
+                                <span class="model-size" x-text="model.file_size_mb.toFixed(1) + ' MB'"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Available models for download -->
+                <div x-show="showAvailable" class="mt-4">
+                    <h3>Available for Download</h3>
+                    <div class="model-grid">
+                        <template x-for="entry in availableModels" :key="entry.key">
+                            <div class="model-card" :class="{ 'model-card-installed': entry.is_downloaded }">
+                                <div class="model-card-header">
+                                    <span class="model-name" x-text="entry.name"></span>
+                                </div>
+                                <div class="model-card-meta">
+                                    <span class="badge" x-text="entry.architecture"></span>
+                                    <span class="badge badge-scale" x-text="entry.scale + 'x'"></span>
+                                </div>
+                                <button class="btn btn-sm btn-primary mt-2"
+                                    x-show="!entry.is_downloaded"
+                                    :disabled="entry.downloading"
+                                    @click="downloadModel(entry)"
+                                    x-text="entry.downloading ? 'Downloading...' : 'Download'">
+                                </button>
+                                <span class="text-success mt-2" x-show="entry.is_downloaded">Installed</span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upscale Tab -->
+        <div x-show="tab === 'upscale'" x-cloak>
+            <div class="upscale-layout">
+                <div class="upscale-sidebar">
+                    <div x-data="imageUploader" class="mb-4">
+                        <div class="upload-zone"
+                             @dragover.prevent="dragover = true"
+                             @dragleave="dragover = false"
+                             @drop.prevent="handleDrop($event)"
+                             :class="{ 'upload-zone-active': dragover }"
+                             @click="$refs.fileInput.click()">
+                            <template x-if="!preview">
+                                <div class="upload-placeholder">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                    <p>Drag & drop an image or click to browse</p>
+                                    <span class="text-muted">PNG, JPG, WebP, BMP, TIFF</span>
+                                </div>
+                            </template>
+                            <template x-if="preview">
+                                <div class="upload-preview">
+                                    <img :src="preview" alt="Preview">
+                                    <div class="upload-info">
+                                        <span x-text="fileName"></span>
+                                        <span x-text="dimensions"></span>
+                                    </div>
+                                </div>
+                            </template>
+                            <input type="file" x-ref="fileInput" accept=".png,.jpg,.jpeg,.webp,.bmp,.tiff,.tif" @change="handleFileSelect($event)" style="display:none">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select class="form-select" x-model="selectedModel">
+                            <option value="">Select a model...</option>
+                            <template x-for="m in $store.models.list" :key="m.model_id">
+                                <option :value="m.model_id" x-text="`${m.model_id} (${m.architecture} ${m.scale}x)`"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Scale</label>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" :class="{ 'btn-primary': upscaleScale === 2 }" @click="upscaleScale = 2">2x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': upscaleScale === 4 }" @click="upscaleScale = 4">4x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': upscaleScale === 8 }" @click="upscaleScale = 8">8x</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Format</label>
+                        <select class="form-select" x-model="outputFormat">
+                            <option value="png">PNG</option>
+                            <option value="jpg">JPEG</option>
+                            <option value="webp">WebP</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-primary btn-block"
+                            :disabled="!uploadedFile || !selectedModel || isProcessing"
+                            @click="startUpscale()">
+                        <span x-show="!isProcessing">Upscale</span>
+                        <span x-show="isProcessing">Processing...</span>
+                    </button>
+                </div>
+
+                <div class="upscale-result">
+                    <div x-show="isProcessing" x-data="progressTracker">
+                        <div class="progress-container">
+                            <div class="progress-label" x-text="progressLabel"></div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="`width: ${progressPercent}%`"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div x-show="resultUrl && !isProcessing" x-data="imageViewer" @result-ready.window="initViewer($event.detail)">
+                        <div class="viewer-container" x-ref="viewerContainer">
+                            <img :src="resultUrl" x-ref="viewerImage" class="viewer-image"
+                                 :style="`transform: scale(${zoom}) translate(${panX}px, ${panY}px)`">
+                        </div>
+                        <div class="viewer-controls">
+                            <button class="btn btn-sm" @click="zoomIn()">+</button>
+                            <button class="btn btn-sm" @click="zoomOut()">-</button>
+                            <button class="btn btn-sm" @click="resetView()">Fit</button>
+                            <a class="btn btn-sm btn-primary" :href="resultUrl" download>Save</a>
+                        </div>
+                    </div>
+                    <div x-show="!resultUrl && !isProcessing" class="empty-state">
+                        <p>Upload an image and select a model to start</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Compare Tab -->
+        <div x-show="tab === 'compare'" x-cloak>
+            <div class="compare-layout">
+                <div class="compare-sidebar">
+                    <div x-data="imageUploader" class="mb-4">
+                        <div class="upload-zone upload-zone-sm"
+                             @dragover.prevent="dragover = true"
+                             @dragleave="dragover = false"
+                             @drop.prevent="handleDrop($event)"
+                             :class="{ 'upload-zone-active': dragover }"
+                             @click="$refs.fileInput.click()">
+                            <template x-if="!preview">
+                                <p>Drop image here</p>
+                            </template>
+                            <template x-if="preview">
+                                <div class="upload-preview-sm">
+                                    <img :src="preview" alt="Preview">
+                                    <span x-text="fileName" class="text-sm"></span>
+                                </div>
+                            </template>
+                            <input type="file" x-ref="fileInput" accept=".png,.jpg,.jpeg,.webp,.bmp,.tiff,.tif" @change="handleFileSelect($event)" style="display:none">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Select Models to Compare</label>
+                        <div class="model-checklist">
+                            <template x-for="m in $store.models.list" :key="m.model_id">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" :value="m.model_id" x-model="compareModels">
+                                    <span x-text="m.model_id"></span>
+                                    <span class="badge badge-sm" x-text="m.architecture"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Scale</label>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" :class="{ 'btn-primary': compareScale === 2 }" @click="compareScale = 2">2x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': compareScale === 4 }" @click="compareScale = 4">4x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': compareScale === 8 }" @click="compareScale = 8">8x</button>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary btn-block"
+                            :disabled="!uploadedFile || compareModels.length === 0 || isComparing"
+                            @click="startComparison()">
+                        <span x-show="!isComparing">Compare</span>
+                        <span x-show="isComparing">Comparing...</span>
+                    </button>
+                </div>
+
+                <div class="compare-result" x-data="comparisonView">
+                    <div x-show="panels.length > 0" class="comparison-grid-wrapper">
+                        <div class="comparison-controls">
+                            <span class="text-muted" x-text="`${panels.length} result${panels.length !== 1 ? 's' : ''}`"></span>
+                            <button class="btn btn-sm" @click="resetZoom()">Reset Zoom</button>
+                            <button class="btn btn-sm btn-primary" @click="saveAll()">Save All</button>
+                        </div>
+                        <div class="comparison-grid"
+                             :style="`grid-template-columns: repeat(${gridCols}, 1fr)`"
+                             @wheel.prevent="handleWheel($event)"
+                             @mousedown="startPan($event)"
+                             @mousemove="handlePan($event)"
+                             @mouseup="endPan()"
+                             @mouseleave="endPan()">
+                            <template x-for="panel in panels" :key="panel.id">
+                                <div class="comparison-panel">
+                                    <div class="panel-label">
+                                        <span x-text="panel.label"></span>
+                                        <span class="panel-time" x-show="panel.duration" x-text="panel.duration + 's'"></span>
+                                    </div>
+                                    <div class="panel-image-container">
+                                        <img :src="panel.url" class="panel-image"
+                                             :style="`transform: scale(${sharedZoom}) translate(${sharedPanX}px, ${sharedPanY}px)`"
+                                             @load="panel.loaded = true">
+                                        <div class="panel-loading" x-show="!panel.loaded && !panel.url">
+                                            <div class="spinner"></div>
+                                            <span>Processing...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                    <div x-show="panels.length === 0" class="empty-state">
+                        <p>Select models and upload an image to compare results side by side</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Tab -->
+        <div x-show="tab === 'batch'" x-cloak x-data="batchPanel">
+            <div class="batch-layout">
+                <div class="batch-sidebar">
+                    <div class="form-group">
+                        <label>Input Directory</label>
+                        <input type="text" class="form-input" x-model="batchInputDir" placeholder="Path to image folder...">
+                    </div>
+                    <div class="form-group">
+                        <label>Output Directory (optional)</label>
+                        <input type="text" class="form-input" x-model="batchOutputDir" placeholder="Leave empty for default output/">
+                    </div>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select class="form-select" x-model="batchModel">
+                            <option value="">Select a model...</option>
+                            <template x-for="m in $store.models.list" :key="m.model_id">
+                                <option :value="m.model_id" x-text="m.model_id"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Scale</label>
+                        <div class="btn-group">
+                            <button class="btn btn-sm" :class="{ 'btn-primary': batchScale === 2 }" @click="batchScale = 2">2x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': batchScale === 4 }" @click="batchScale = 4">4x</button>
+                            <button class="btn btn-sm" :class="{ 'btn-primary': batchScale === 8 }" @click="batchScale = 8">8x</button>
+                        </div>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" x-model="batchRecursive">
+                        <span>Include subdirectories</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" x-model="batchSkipExisting">
+                        <span>Skip existing files</span>
+                    </label>
+                    <button class="btn btn-primary btn-block mt-4"
+                            :disabled="!batchInputDir || !batchModel || batchRunning"
+                            @click="startBatch()">
+                        <span x-show="!batchRunning">Start Batch</span>
+                        <span x-show="batchRunning">Processing...</span>
+                    </button>
+                </div>
+                <div class="batch-result">
+                    <div x-show="batchRunning || batchStatus" x-data="progressTracker" class="batch-progress">
+                        <div class="progress-container">
+                            <div class="progress-label" x-text="progressLabel || 'Starting...'"></div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="`width: ${progressPercent}%`"></div>
+                            </div>
+                        </div>
+                        <div x-show="batchStatus" class="batch-summary mt-4">
+                            <p x-text="batchStatus"></p>
+                        </div>
+                    </div>
+                    <div x-show="!batchRunning && !batchStatus" class="empty-state">
+                        <p>Configure batch settings and start processing</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" x-show="showSettings" x-cloak @click.self="showSettings = false" x-data="settingsPanel" x-init="loadSettings()">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="btn btn-icon" @click="showSettings = false">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Tile Size</label>
+                    <div class="range-group">
+                        <input type="range" min="128" max="1024" step="128" x-model.number="tileSize">
+                        <span x-text="tileSize + 'px'"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Output Format</label>
+                    <select class="form-select" x-model="defaultFormat">
+                        <option value="png">PNG</option>
+                        <option value="jpg">JPEG</option>
+                        <option value="webp">WebP</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>JPEG/WebP Quality</label>
+                    <div class="range-group">
+                        <input type="range" min="50" max="100" step="5" x-model.number="jpegQuality">
+                        <span x-text="jpegQuality"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" x-model="fp16">
+                        <span>FP16 (half precision) — faster, uses less VRAM</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Default Scale</label>
+                    <div class="btn-group">
+                        <button class="btn btn-sm" :class="{ 'btn-primary': defaultScale === 2 }" @click="defaultScale = 2">2x</button>
+                        <button class="btn btn-sm" :class="{ 'btn-primary': defaultScale === 4 }" @click="defaultScale = 4">4x</button>
+                        <button class="btn btn-sm" :class="{ 'btn-primary': defaultScale === 8 }" @click="defaultScale = 8">8x</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Max Loaded Models</label>
+                    <div class="btn-group">
+                        <button class="btn btn-sm" :class="{ 'btn-primary': maxLoadedModels === 1 }" @click="maxLoadedModels = 1">1</button>
+                        <button class="btn btn-sm" :class="{ 'btn-primary': maxLoadedModels === 2 }" @click="maxLoadedModels = 2">2</button>
+                        <button class="btn btn-sm" :class="{ 'btn-primary': maxLoadedModels === 3 }" @click="maxLoadedModels = 3">3</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" @click="showSettings = false">Cancel</button>
+                <button class="btn btn-primary" @click="saveSettings(); showSettings = false">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" x-data="{ toasts: [] }"
+         @toast.window="toasts.push({msg: $event.detail.msg, type: $event.detail.type || 'info', id: Date.now()}); setTimeout(() => toasts.shift(), 4000)">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="toast" :class="'toast-' + toast.type" x-text="toast.msg"
+                 x-transition.opacity></div>
+        </template>
+    </div>
+</body>
+</html>

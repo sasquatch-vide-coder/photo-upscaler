@@ -1,0 +1,27 @@
+# Photo Upscaler — Default Configuration
+# Copy to config.yaml to customize. Environment vars override with UPSCALER_ prefix.
+
+models_dir: "models"
+output_dir: "output"
+temp_dir: "temp"
+
+# Upscaling defaults
+default_scale: 4
+default_format: "png"
+jpeg_quality: 95
+
+# Tiling
+tile_size: 512
+tile_overlap: 32
+
+# Performance
+fp16: true
+max_loaded_models: 3
+
+# Server
+host: "127.0.0.1"
+port: 8000
+open_browser: true
+
+# Temp cleanup
+temp_max_age_minutes: 60
