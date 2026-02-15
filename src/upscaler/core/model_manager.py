@@ -47,6 +47,7 @@ class ModelManager:
 
         self._registry: dict[str, ModelInfo] = {}       # model_id → info
         self._loaded: OrderedDict[str, Any] = OrderedDict()  # model_id → loaded model (LRU)
+        self._fp16_incompatible: set[str] = set()  # models that don't support fp16
         self._cache_path = self.models_dir / ".model_cache.json"
 
     # --- Scanning ---
@@ -111,13 +112,20 @@ class ModelManager:
         loader = spandrel.ModelLoader(device=device)
         model = loader.load_from_file(info.path)
 
-        if settings.fp16 and device == "cuda":
+        if settings.fp16 and device == "cuda" and model_id not in self._fp16_incompatible:
             model.model.half()
 
         model.model.eval()
         self._loaded[model_id] = model
         self.progress.emit(EventType.MODEL_LOADED, model_id=model_id)
         return model
+
+    def reload_model_fp32(self, model_id: str) -> Any:
+        """Reload a model in fp32 after fp16 failure. Marks it as fp16-incompatible."""
+        logger.warning("Model %s is not compatible with fp16, reloading in fp32", model_id)
+        self._fp16_incompatible.add(model_id)
+        self.unload_model(model_id)
+        return self.get_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
         """Explicitly unload a model from GPU memory."""

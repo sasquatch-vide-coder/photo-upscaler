@@ -77,32 +77,48 @@ class UpscaleEngine:
         passes_needed = _compute_passes(scale, model_scale)
 
         current = img_tensor
-        for pass_idx in range(passes_needed):
-            logger.info(
-                "Pass %d/%d (model scale=%dx)",
-                pass_idx + 1, passes_needed, model_scale,
-            )
-
-            def process_fn(tile: torch.Tensor, _model=model) -> torch.Tensor:
-                return _model(tile)
-
-            def tile_progress(done: int, total: int, _pass=pass_idx) -> None:
-                self.progress.emit(
-                    EventType.TILE_PROGRESS,
-                    pass_num=_pass + 1,
-                    total_passes=passes_needed,
-                    tiles_done=done,
-                    tiles_total=total,
+        try:
+            for pass_idx in range(passes_needed):
+                logger.info(
+                    "Pass %d/%d (model scale=%dx)",
+                    pass_idx + 1, passes_needed, model_scale,
                 )
 
-            current = process_tiles(
-                current,
-                process_fn=process_fn,
-                scale=model_scale,
-                tile_size=tile_size,
-                overlap=tile_overlap,
-                progress_fn=tile_progress,
-            )
+                def process_fn(tile: torch.Tensor, _model=model) -> torch.Tensor:
+                    return _model(tile)
+
+                def tile_progress(done: int, total: int, _pass=pass_idx) -> None:
+                    self.progress.emit(
+                        EventType.TILE_PROGRESS,
+                        pass_num=_pass + 1,
+                        total_passes=passes_needed,
+                        tiles_done=done,
+                        tiles_total=total,
+                    )
+
+                current = process_tiles(
+                    current,
+                    process_fn=process_fn,
+                    scale=model_scale,
+                    tile_size=tile_size,
+                    overlap=tile_overlap,
+                    progress_fn=tile_progress,
+                )
+        except RuntimeError as e:
+            if "expected scalar type" in str(e) and use_fp16:
+                logger.warning("Model %s failed with fp16, retrying in fp32", model_id)
+                self.model_manager.reload_model_fp32(model_id)
+                return self.upscale(
+                    input_path=input_path,
+                    output_path=output_path,
+                    model_id=model_id,
+                    scale=scale,
+                    output_format=output_format,
+                    tile_size=tile_size,
+                    tile_overlap=tile_overlap,
+                    jpeg_quality=jpeg_quality,
+                )
+            raise
 
         # If total upscale overshot the target, downscale with Lanczos
         achieved_scale = model_scale ** passes_needed

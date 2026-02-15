@@ -118,12 +118,13 @@ class ComparisonRunner:
         tile_size: int,
         tile_overlap: int,
         jpeg_quality: int,
+        _fp32_retry: bool = False,
     ) -> Path:
         """Upscale a single image with one model."""
         model = self.model_manager.get_model(model_id)
         model_scale = model.scale
         device = next(model.model.parameters()).device
-        use_fp16 = settings.fp16 and device.type == "cuda"
+        use_fp16 = settings.fp16 and device.type == "cuda" and not _fp32_retry
 
         img_tensor = load_image_as_tensor(input_path, device=str(device))
         if use_fp16:
@@ -132,21 +133,32 @@ class ComparisonRunner:
         passes_needed = _compute_passes(scale, model_scale)
         current = img_tensor
 
-        for pass_idx in range(passes_needed):
-            def process_fn(tile: torch.Tensor, _model=model) -> torch.Tensor:
-                return _model(tile)
+        try:
+            for pass_idx in range(passes_needed):
+                def process_fn(tile: torch.Tensor, _model=model) -> torch.Tensor:
+                    return _model(tile)
 
-            def tile_progress(done: int, total: int) -> None:
-                self.progress.emit(
-                    EventType.TILE_PROGRESS,
-                    model_id=model_id,
-                    tiles_done=done,
-                    tiles_total=total,
+                def tile_progress(done: int, total: int) -> None:
+                    self.progress.emit(
+                        EventType.TILE_PROGRESS,
+                        model_id=model_id,
+                        tiles_done=done,
+                        tiles_total=total,
+                    )
+
+                current = process_tiles(
+                    current, process_fn, model_scale, tile_size, tile_overlap, tile_progress,
                 )
-
-            current = process_tiles(
-                current, process_fn, model_scale, tile_size, tile_overlap, tile_progress,
-            )
+        except RuntimeError as e:
+            if "expected scalar type" in str(e) and not _fp32_retry:
+                # fp16 incompatible — reload in fp32 and retry
+                self.model_manager.reload_model_fp32(model_id)
+                return self._upscale_single(
+                    input_path, model_id, scale, output_dir,
+                    output_format, tile_size, tile_overlap, jpeg_quality,
+                    _fp32_retry=True,
+                )
+            raise
 
         achieved_scale = model_scale ** passes_needed
         if achieved_scale != scale:
